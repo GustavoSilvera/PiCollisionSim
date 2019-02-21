@@ -120,7 +120,7 @@ public:
 			timeB = 1 / kFreq - fabs(timeA);//rest of the time
 			velocity *= -1;//full elastic collision, 100% perfect
 			pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-			numClacks++;
+			//numClacks++;
 			return true;
 		}
 		return false;
@@ -135,7 +135,7 @@ public:
 			timeB = 1 / kFreq - fabs(timeA);//rest of the time
 			velocity *= -1;//full elastic collision, 100% perfect
 			pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-			numClacks++;
+			//numClacks++;
 		}
 	}
 	double calcNextTime(class square *s) {
@@ -147,9 +147,12 @@ public:
 		//kinematics time!!
 		double distanceWall = ((pos.X - size / 2) - (w->pos.X));//distance between left edge of square and wall;
 		timeToWall = fabs(distanceWall / velocity);
-		double newOtherXPos = s->pos.X - s->velocity * timeToWall;//changes position during timeToWall REMEMBER VELOCITY IS BACKWARDS
-		double distanceSquare = ((pos.X + size / 2) - (newOtherXPos - s->size / 2));
-		double timeToSquare = fabs(distanceSquare / (velocity + s->velocity));
+		double newOtherDist = s->velocity * timeToWall;//changes position during timeToWall REMEMBER VELOCITY IS BACKWARDS//FABS??
+		double secondNewOtherDist = (distanceWall - newOtherDist) / (1 + (s->velocity/velocity) );
+		//double distanceSquare = ((pos.X + size / 2) - (newOtherDist - s->size / 2));
+		numClacks += 1;
+
+		double timeToSquare = ((secondNewOtherDist) / velocity);
 		return (timeToWall + timeToSquare);
 	}
 	bool collideSquare(class square *s) {//perfectly elastic collision
@@ -180,8 +183,7 @@ public:
 				s->pos.X = s->pos.X - (oldOtherVelocity * timeA + s->velocity * timeB);//updates position of new block
 																					   //pos.X = s->pos.X - s->size / 2 - r;//resets position to be just before touching the other block
 				nextCollTime += calcTimeToNextColl(&w, s);
-				numClacks++;
-				collideWallTime(w);//check collisions within the wall
+				//collideWallTime(w);//check collisions within the wall
 			}
 			return true;
 		}
@@ -218,7 +220,7 @@ public:
 	*/
 };
 square sqr1 = square(1, 0, vec3(4, 0), 1);
-square sqr2 = square(10000, 1, vec3(8, 0), 1.5);
+square sqr2 = square(100, 1, vec3(8, 0), 1.5);
 
 //begin
 int tX = 1200;
