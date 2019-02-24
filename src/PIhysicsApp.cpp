@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 #include <filesystem>
+#include <utility>
 //my own headers
 
 //declaration for the main things, simulation and whatnot
@@ -20,14 +21,12 @@ using namespace ci::app;
 using namespace std;
 
 const double ppm = 100;//scale of how many pixels are in 1 SI Meter
-const double refY = 10;//8m down from top of page
-int numClacks = 0;
+
 Font mFont;//custom font for optimized drawing
 gl::TextureFontRef mTextureFont;//custom opengl::texture
 static double kFreq = 60;//refresh rate
 static double sqr(double x) { return x * x; }
-static double GlobalTime = 0;
-//static double nextCollision;
+
 class vec3 {
 public:
 	vec3(double x = 0.0, double y = 0.0, double z = 0.0) : X(x), Y(y), Z(z) {}
@@ -38,6 +37,7 @@ public:
 	vec3 operator+(vec3 v) { return vec3(X + v.X, Y + v.Y, Z + v.Z); }
 	vec3 operator*(double f) { return vec3(f*X, f*Y, f*Z); }
 };
+
 class quadratic {
 public:
 	quadratic(double aparam, double bparam, double cparam) : a(aparam), b(bparam), c(cparam) {}
@@ -70,163 +70,169 @@ public:
 		return ans;
 	}
 };
-class wall {
-public:
-	wall(vec3 p, vec3 dimX, vec3 dimY) : pos(p), dimensX(dimX), dimensY(dimY) {}
-	vec3 pos;
-	vec3 dimensX, dimensY;
-	Area drawArea() {
-		double L = dimensX.X;
-		double R = dimensX.Y;
-		double U = dimensY.X;
-		double D = dimensY.Y;
-		return (Area(ppm*(Vec2f(pos.X - L, (pos.Y - U) + refY)), ppm*(Vec2f(pos.X + R, (pos.Y + D) + refY))));
-	}
-};
-wall w = wall(vec3(1, 0), vec3(0.2, 0.0), vec3(6.0, 0.0));
-wall f = wall(vec3(1, 0), vec3(0.2, 15.0), vec3(0.0, 0.2));
 
-class square {//ALL SI UNITS
+/////////////////////scene.h
+using Coordinates = std::pair<Vec2f, Vec2f>;
+class Box_properties {
 public:
-	square(float m, double v, vec3 p, double s) : mass(m), velocity(v), pos(p), size(s) {}
-	vec3 pos;
-	double mass;
-	double size;
 	double velocity;
-	double momentum;
+	double mass;
 	double kinE;
-	double nextCollTime, timeToWall;
-	Area drawArea() {
-		double r = size / 2;
-		return (Area(ppm*(Vec2f(pos.X - r, (pos.Y) + refY)), ppm*(Vec2f(pos.X + r, (pos.Y - 2 * r) + refY))));
-	}
-	bool update(class square *other) {
-		if (kFreq != 0) pos.X -= velocity / kFreq;
-		else pos.X += 0;
-		//pos.Y += velocity / 60;//NO VELOCITY IN Y UNIMPORTANNT
-		kinE = 0.5 * (mass)* sqr(velocity);//k=1/2mv^2
-		momentum = mass * velocity;
-		return collideWall(w);
-	}
-	bool collideWall(class wall w) {//perfectly elastic collision
-		double r = size / 2;
-		if (pos.X - r < w.pos.X) {//checks both position and velocity direction
-								  //kinematics time!!
-			double timeA, timeB;//times within collision
-			double oldVelocity = velocity;//v0 of current
-			double distance = ((pos.X - r) - w.pos.X);//distance between edges of each squares;
-			timeA = distance / oldVelocity;
-			//NON ABS() BC REFRESH IS AFTER THE COLLISION PASSES THROUGH
-			timeB = 1 / kFreq - fabs(timeA);//rest of the time
-			velocity *= -1;//full elastic collision, 100% perfect
-			pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-			//numClacks++;
-			return true;
-		}
-		return false;
-	}
-	void collideWallTime(class wall w) {//perfectly elastic collision
-		while (nextCollTime + timeToWall < GlobalTime + 1 / kFreq) {//checks if time is within threshold
-			//kinematics time!!
-			double timeA, timeB;//times within collision
-			double oldVelocity = velocity;//v0 of current
-			timeA = (nextCollTime + timeToWall) - GlobalTime;
-			//NON ABS() BC REFRESH IS AFTER THE COLLISION PASSES THROUGH
-			timeB = 1 / kFreq - fabs(timeA);//rest of the time
-			velocity *= -1;//full elastic collision, 100% perfect
-			pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-			//numClacks++;
-		}
-	}
-	double calcNextTime(class square *s) {
-		//kinematics time!!
-		double distance = fabs((pos.X + size / 2) - (s->pos.X - s->size / 2));//distance between edges of each squares;
-		return (distance / (velocity + s->velocity));
-	}
-	double calcTimeToNextColl(class wall *w, class square *s) {//!!make individual condition for last clack, so dont get weird effect
-		//kinematics time!!
-		double distanceWall = ((pos.X - size / 2) - (w->pos.X));//distance between left edge of square and wall;
-		timeToWall = fabs(distanceWall / velocity);
-		double newOtherDist = s->velocity * timeToWall;//changes position during timeToWall REMEMBER VELOCITY IS BACKWARDS//FABS??
-		double secondNewOtherDist = (distanceWall - newOtherDist) / (1 + (s->velocity/velocity) );
-		//double distanceSquare = ((pos.X + size / 2) - (newOtherDist - s->size / 2));
-		numClacks += 1;
-
-		double timeToSquare = ((secondNewOtherDist) / velocity);
-		return (timeToWall + timeToSquare);
-	}
-	bool collideSquare(class square *s) {//perfectly elastic collision
-		if (nextCollTime > GlobalTime + 1/kFreq) {//past the time of impact
-			//USE WHILE LOOP IN HERE (have to be able to calculate multiple clacks within the same time quantization)
-			return false;
-		}
-		else {//DID collide (within time of impact)
-			while (nextCollTime < GlobalTime + 1 / kFreq) {
-				double mr = (s->mass / mass);//mass ration m2/m1
-				double a = sqr(mr) + mr;
-				double b = -2 * (sqr(mr)*s->velocity + mr * velocity);
-				double c = sqr(mr)*sqr(s->velocity) + 2 * velocity*s->velocity*mr - mr * sqr(s->velocity);
-				quadratic newVel2 = quadratic(a, b, c);
-				vec3 velZeros = newVel2.solve();
-				//kinematics time!!
-				double timeA, timeB;//times within collision
-				double oldVelocity = velocity;//v0 of current
-				double oldOtherVelocity = s->velocity;//v0 of other block
-				timeA = nextCollTime - GlobalTime;
-				timeB = 1 / kFreq - timeA;//rest of the time
-				if (fabs(s->velocity - velZeros.X) > 0.0001) {//quadratic answer elimination
-					s->velocity = velZeros.X;//vF = other block
-				}
-				else s->velocity = velZeros.Y;
-				velocity = velocity + mr * (oldOtherVelocity - s->velocity);//vF of current block
-				pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-				s->pos.X = s->pos.X - (oldOtherVelocity * timeA + s->velocity * timeB);//updates position of new block
-																					   //pos.X = s->pos.X - s->size / 2 - r;//resets position to be just before touching the other block
-				nextCollTime += calcTimeToNextColl(&w, s);
-				//collideWallTime(w);//check collisions within the wall
-			}
-			return true;
-		}
-	}
-	/*bool collideSquare(class square *s) {//perfectly elastic collision
-		double r = size / 2;
-		if (fabs(pos.X - s->pos.X) <= r + (s->size / 2)) {//use kinematics?
-			//USE WHILE LOOP IN HERE (have to be able to calculate multiple clacks within the same time quantization)
-			double mr = (s->mass / mass);//mass ration m2/m1
-			double a = sqr(mr) + mr;
-			double b = -2 * (sqr(mr)*s->velocity + mr * velocity);
-			double c = sqr(mr)*sqr(s->velocity) + 2 * velocity*s->velocity*mr - mr * sqr(s->velocity);
-			quadratic newVel2 = quadratic(a, b, c);
-			vec3 velZeros = newVel2.solve();
-			//kinematics time!!
-			double timeA, timeB;//times within collision
-			double oldVelocity = velocity;//v0 of current
-			double oldOtherVelocity = s->velocity;//v0 of other block
-			double distance = ((pos.X + r) - (s->pos.X - s->size / 2));//distance between edges of each squares;
-			timeA = distance / (oldOtherVelocity + oldVelocity);
-			timeB = 1 / kFreq - fabs(timeA);//rest of the time
-			if (fabs(s->velocity - velZeros.X) > 0.0001) {
-				s->velocity = velZeros.X;//vF = other block
-			}
-			else s->velocity = velZeros.Y;
-			velocity = velocity + mr * (oldOtherVelocity - s->velocity);//vF of current block
-			pos.X = pos.X - (oldVelocity * timeA + velocity * timeB);//updates position of current block
-			s->pos.X = s->pos.X - (oldOtherVelocity * timeA + s->velocity * timeB);//updates position of new block
-																				   //pos.X = s->pos.X - s->size / 2 - r;//resets position to be just before touching the other block
-			return true;
-		}
-		return false;
-	}
-	*/
+	double momentum;
+	double posX;
 };
-square sqr1 = square(1, 0, vec3(4, 0), 1);
-square sqr2 = square(100, 1, vec3(8, 0), 1.5);
+class Box {
+public:
+	Box(double distance_to_wall, double size):
+		distance_to_wall{ distance_to_wall },
+		size{ size } {	}
+	Coordinates Coords() const {
+		return { Vec2f{ static_cast<float>(distance_to_wall),0.0f },//leftmost edge	
+			Vec2f{ static_cast<float>(distance_to_wall + size), static_cast<float>(size) } };//rightmost edge
+	}
+	double DistanceToWall() const {
+		return distance_to_wall;
+	}
+	double Size() const { return size; }
+private:
+	double distance_to_wall;
+	double size;
+};
+
+void EnergyTransfer(double& small_speed, double small_mass, double& large_speed, double large_mass) { 
+	//std::swap(*small_speed, *large_speed); // full energy transfer
+	double mr = (large_mass / small_mass);//mass ration m2/m1
+	//divide everything by mr
+	double a = (sqr(mr) + mr);
+	double b = -2 * (sqr(mr)*large_speed + mr * small_speed);
+	double c = sqr(mr)*sqr(large_speed) + 2 * small_speed*large_speed*mr - mr * sqr(large_speed);
+	//DOSENT WORK FOR 1e+8
+	/*double a = 1 + mr;
+	double b = -2 * (mr * large_speed + small_speed);
+	double c = mr * sqr(large_speed) + 2 * small_speed * large_speed - sqr(large_speed);*/
+	quadratic newVel2 = quadratic(a, b, c);
+	vec3 velZeros = newVel2.solve();
+	double oldLargeVelocity = large_speed;//v0 of other block
+	if (std::abs(large_speed - velZeros.X) > std::abs(large_speed - velZeros.Y)) {//takes the one further away
+		large_speed = velZeros.X;//vF = other block
+	}
+	else large_speed = velZeros.Y;
+	small_speed = small_speed + mr * oldLargeVelocity - mr * large_speed;//vF of current block
+}
+
+class State {
+public:
+	State(double small_x, double large_x, double time) ://snapshot of time
+		small{ small_x, 1.0},
+		large{ large_x, 1.5},
+		time{ time }
+	{}
+	Box Small() const { return small; }
+	Box Large() const { return large; }
+	double Time() const { return time; }
+
+	State NextCollision(double small_speed, double small_mass, double large_speed, double large_mass) const {
+		if (small.DistanceToWall() == 0.0) {
+			// Bounce small off the wall
+			small_speed = -small_speed;//perfectly elastic collision
+			//large_speed = large_speed;
+		} else {
+			// energy/momentum transfer
+			EnergyTransfer(small_speed, small_mass, large_speed, large_mass);
+		}
+		double time_to_collision = 60 * 60 * 24 * 365.25 * 100; // 100 years (forever)
+		if (small_speed > large_speed ) {
+			// Going towards each other.
+			double distance = large.DistanceToWall() - small.DistanceToWall() - small.Size();
+			time_to_collision = distance / (small_speed - large_speed);
+		}
+		if (small_speed < 0.0) {
+			double time_to_wall = small.DistanceToWall() / - small_speed;
+			if (time_to_wall < time_to_collision) {
+				return State{ 0.0,
+					large.DistanceToWall() + time_to_wall * large_speed,
+					time + time_to_wall };
+			}
+		}
+		return State{	small.DistanceToWall() + time_to_collision * small_speed,
+						large.DistanceToWall() + time_to_collision * large_speed,
+						time + time_to_collision 
+		};
+	}
+private:
+	Box small, large;
+	double time;
+};
+
+double Interpolate(double a, double b, double ratio) {
+	return a + (b - a)*ratio;
+}
+
+State Interpolate(const State &from, const State &to, double time) {
+	double ratio = (time - from.Time()) / (to.Time() - from.Time());
+	return State{ Interpolate(from.Small().DistanceToWall(), to.Small().DistanceToWall(), ratio),
+		Interpolate(from.Large().DistanceToWall(), to.Large().DistanceToWall(), ratio),
+		time };
+}
+
+class Scene {
+public:
+	Scene() :
+		current{1.0, 5.0, 0.0},
+		previous_clack{ current },
+		next_clack{ 1.0, 2.0, 3.0 }
+	{	}
+	double small_mass = 1, large_mass = 1;
+	double small_speed = 0, large_speed = 0;
+	Box_properties small_prop, large_prop;
+	bool Update(double new_time) {
+		bool clacked = false;
+		while (next_clack.Time() < new_time) {
+			clacked = true;
+			double time_delta = next_clack.Time() - previous_clack.Time();
+			small_speed = (next_clack.Small().DistanceToWall() - previous_clack.Small().DistanceToWall()) / time_delta;
+			large_speed = (next_clack.Large().DistanceToWall() - previous_clack.Large().DistanceToWall()) / time_delta;
+			previous_clack = next_clack;
+			next_clack = next_clack.NextCollision(small_speed, small_mass, large_speed, large_mass);
+			++num_clacks;
+		}
+		current = Interpolate(previous_clack, next_clack, new_time);
+		//update box properties (for drawing)
+		small_prop.velocity = small_speed;
+		large_prop.velocity = large_speed;
+		small_prop.mass = small_mass;
+		large_prop.mass = large_mass;
+		small_prop.posX = current.Small().DistanceToWall();
+		large_prop.posX = current.Large().DistanceToWall();
+		return clacked;
+	}
+	Coordinates SmallBoxCoords() const {
+		return current.Small().Coords();
+	}
+	Coordinates LargeBoxCoords() const {
+		return current.Large().Coords();
+	}
+	Box SmallBox() const {
+		return current.Small();
+	}
+	Box LargeBox() const {
+		return current.Large();
+	}
+	int TotalClacks() const {
+		return num_clacks;
+	}
+private:
+	State current, previous_clack, next_clack;
+	int num_clacks = 0;
+};
+/////////////////////scene.h
 
 //begin
 int tX = 1200;
 class PIhysicsApp : public AppNative {
 public:
-	PIhysicsApp() {}
+	PIhysicsApp()  {}
+
 	void prepareSettings(Settings *settings);
 	void setup();
 	void mouseDown(MouseEvent event);
@@ -234,21 +240,36 @@ public:
 	void mouseMove(MouseEvent event);
 	void keyDown(KeyEvent event);
 	void keyUp(KeyEvent event);
-	void update();
-	void textDraw(square s);
+	void update() override {
+		if(kFreq != 0) current_time += 1.0 / kFreq;
+		if (scene.Update(current_time)) clack();
+	}
+
+	void textDraw(class Box_properties s);
 	static void drawFontText(float text, vec3 pos);
 	audio::VoiceRef clackSound;
 	void clack();
-	struct text {
-		string s;
-	};
-	void draw();
+	//	struct text {
+	//		string s;
+	//	};
+	void draw() override;
+	Area MapArea(Coordinates box) {
+		const Vec2f ref = { 2, 10 }; // 2m right, 8 down
+
+		const double kHeight = 1.0;
+		return Area(ppm*(ref + Vec2f(box.first.x, -box.first.y)),
+			ppm*(ref + Vec2f(box.second.x, -box.second.y)));
+	}
 private:
 	// Change screen resolution
 	int mScreenWidth, mScreenHeight;
 	float initWidth, initHeight;
 	void getScreenResolution(int& width, int& height);
+
+	double current_time = 0.0;
+	class Scene scene;
 };
+
 void PIhysicsApp::prepareSettings(Settings *settings) {
 	//! setup our window
 	settings->setTitle("PIhysics");
@@ -285,7 +306,6 @@ void PIhysicsApp::setup() {
 	audio::SourceFileRef sourceFile = audio::load(app::loadAsset("clack.mp3"));
 	clackSound = audio::Voice::create(sourceFile);
 	//clack2 = audio::Voice::create(sourceFile);
-	sqr1.nextCollTime = sqr1.calcNextTime(&sqr2);//initial time
 }
 //setup for on screen buttons
 //when mouse is clicked
@@ -313,10 +333,16 @@ void PIhysicsApp::keyDown(KeyEvent event) {
 //what to do when keyboard key is released
 void PIhysicsApp::keyUp(KeyEvent event) {
 	//base
-	if (event.getCode() == KeyEvent::KEY_UP) kFreq += 60;
-	if (event.getCode() == KeyEvent::KEY_DOWN) if (kFreq >= 60) kFreq -= 60;
-	if (event.getCode() == KeyEvent::KEY_RIGHT) kFreq += 36000;
-	if (event.getCode() == KeyEvent::KEY_LEFT) if (kFreq >= 36000) kFreq -= 36000;
+	if (event.getCode() == KeyEvent::KEY_UP) scene.large_mass *= 100;
+	if (event.getCode() == KeyEvent::KEY_DOWN) if (scene.large_mass >= 100) scene.large_mass /= 100;
+	if (event.getChar() == 'R' || event.getChar() == 'r') {
+		scene = Scene();//reset
+		current_time = 0;
+	}
+	if (event.getCode() == KeyEvent::KEY_SPACE) {
+		if (kFreq == 60) kFreq = 0;
+		else kFreq = 60;
+	}
 
 	/*if (event.getCode() == KeyEvent::KEY_DOWN || event.getChar() == 's' || event.getChar() == 'S') v.r[0].ctrl.KeyDown = false;
 	if (event.getCode() == KeyEvent::KEY_UP || event.getChar() == 'w' || event.getChar() == 'W') v.r[0].ctrl.KeyUp = false;
@@ -328,38 +354,32 @@ void PIhysicsApp::keyUp(KeyEvent event) {
 void PIhysicsApp::clack() {
 	clackSound->stop();
 	clackSound->start();
-	//numClacks++;
 }
-void PIhysicsApp::update() {
-	GlobalTime += 1/ kFreq;//updates by freq
-	if (sqr1.update(&sqr2)) clack();
-	if (sqr2.update(&sqr1)) clack();
-	if (sqr1.collideSquare(&sqr2)) clack();
-}
+
 //drawing the text used for debugging or just other details
-void PIhysicsApp::textDraw(square s) {//function for drawing the buttons 
-									  //(	WARNING: RESOURCE HOG!!!!!!!!!!!)
+void PIhysicsApp::textDraw(class Box_properties s) {//function for drawing the buttons 
+										 //(	WARNING: RESOURCE HOG!!!!!!!!!!!)
 	struct text {
 		string s;
 		double f;
 	};
 	text t[] = {
-
-		{ "mass", (s.mass) },
-	{ "vel", (s.velocity) }
+		{ "mass:", (s.mass) },
+		{ "vel:", (s.velocity) }
 	//{ "momt", (s.momentum) },
 	//{ "kinE", (s.kinE) }
-	//velocity and acceleration measured with drawDials
 	};
 	int i = 0;
+	const int refY = 9, refX = 2.5;
+	
 	for (text& ti : t) {
-		int tY = (i + 2 * s.size);//increment x position for each button based off index
-		gl::drawString(ti.s, ppm*Vec2f(s.pos.X - s.size / 2, (s.pos.Y + refY) - tY), Color(1, 1, 1), Font("Times", 45));
-		drawFontText(ti.f, vec3(s.pos.X + s.size / 2, (s.pos.Y + refY) - tY).times(ppm));
+		int tY = (i + 4);//increment y position for each button based off index
+		//double posX = (s.Coords().first + s.Coords().second) / 2;//middle of two edges
+		gl::drawString(ti.s, ppm*Vec2f(s.posX + refX, refY - tY), Color(1, 1, 1), Font("Times", 45));
+		drawFontText(ti.f, vec3(s.posX + refX + 1, refY - tY).times(ppm));
 		++i;
 	}
 	gl::color(1, 1, 1);
-
 }
 
 void PIhysicsApp::drawFontText(float text, vec3 pos) {
@@ -371,17 +391,18 @@ void PIhysicsApp::drawFontText(float text, vec3 pos) {
 	mTextureFont->drawString(PRINT, Vec2f(pos.X, pos.Y + 20));
 	gl::color(1, 1, 1);
 }
+
 void PIhysicsApp::draw() {
 	gl::enableAlphaBlending();//good for transparent images
 	gl::clear(Color(0, 0, 0));
 
 	gl::color(1, 1, 1);
-	gl::drawSolidRect(sqr1.drawArea());
-	gl::drawSolidRect(sqr2.drawArea());
-	gl::drawSolidRect(w.drawArea());
-	gl::drawSolidRect(f.drawArea());
-	textDraw(sqr1);
-	textDraw(sqr2);
+	gl::drawSolidRect(MapArea(scene.SmallBoxCoords()));
+	gl::drawSolidRect(MapArea(scene.LargeBoxCoords()));
+	gl::drawSolidRect(MapArea(Coordinates{{-0.1f, 0.0f }, { 0.0f, 5.0f }})); // Wall
+	gl::drawSolidRect(MapArea(Coordinates{{-0.1f, 0.0f },{ 10.0f, -0.1f } })); // Floor
+	textDraw(scene.small_prop);
+	textDraw(scene.large_prop);
 
 	gl::color(1, 1, 1);
 
@@ -389,12 +410,10 @@ void PIhysicsApp::draw() {
 	drawFontText(getAverageFps(), vec3(getWindowWidth() - 130, 10));
 
 	gl::drawString("Clacks: ", Vec2f(getWindowWidth() - 250, 100), Color(0, 1, 0), Font("Times", 45));
-	drawFontText(numClacks, vec3(getWindowWidth() - 130, 100));
+	drawFontText(scene.TotalClacks(), vec3(getWindowWidth() - 130, 100));
 
 	gl::drawString("Refresh: ", Vec2f(getWindowWidth() - 250, 190), Color(0, 1, 0), Font("Times", 45));
 	drawFontText(kFreq, vec3(getWindowWidth() - 130, 190));
-
-
 }
 //awesomesause
 CINDER_APP_NATIVE(PIhysicsApp, RendererGl)
