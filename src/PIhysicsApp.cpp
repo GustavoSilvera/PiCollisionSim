@@ -283,7 +283,7 @@ void PIhysicsApp::update() {
 	if (sqr1.collideSquare(&sqr2)) clack();
 	if (!pause) {
 		kFreq = oldKfreq;
-		if (fabs(sqr1.velocity) > 5 && 1.5 * sqr(sqr1.velocity) < 180000) {
+		if (fabs(sqr1.velocity) > 5 && 1.5 * sqr(sqr1.velocity) < 1.5*sqr2.mass/10) {
 			kFreq = 1.5 * sqr(sqr1.velocity);
 		}
 		oldKfreq = kFreq;
