@@ -38,38 +38,114 @@ public:
 	vec3 operator*(double f) { return vec3(f*X, f*Y, f*Z); }
 };
 
-class quadratic {
+class Polynomial {
 public:
-	quadratic(double aparam, double bparam, double cparam) : a(aparam), b(bparam), c(cparam) {}
-	double a, b, c;
-	double solveAdd() {
-		double ans = 0;
-		try {
-			ans = ((-b + sqrt(sqr(b) - 4 * a*c)) / (2 * a));
-		}
-		catch (const std::exception &e) {
-			return 0;
-		}
-		return(ans);
+	Polynomial()  {}
+	explicit Polynomial(double c0) {
+		coeffs.push_back(c0);
 	}
-	double solveSub() {
-		double ans = 0;
-		try {
-			ans = ((-b - sqrt(sqr(b) - 4 * a*c)) / (2 * a));
-		}
-		catch (const std::exception &e) {
-			return 0;
-		}
-		return(ans);
+	Polynomial(double c1, double c0) {
+		coeffs.push_back(c0);
+		coeffs.push_back(c1);
 	}
-	vec3 solve() {
-		vec3 ans;
-		ans.X = solveAdd();
-		ans.Y = solveSub();
-		ans.Z = 0;
-		return ans;
+	Polynomial(double c2, double c1, double c0) {
+		coeffs.push_back(c0);
+		coeffs.push_back(c1);
+		coeffs.push_back(c2);
 	}
+	Polynomial(double c, int i) { // c x ^ i
+		coeffs.resize(i);
+		coeffs.push_back(c);
+	}
+	
+	double eval(double x) const {
+		double result = 0.0;
+		double xi = 1.0;
+		for (int i = 0; i < coeffs.size(); ++i) {
+			result += coeffs[i] * xi;
+			xi *= x;
+		}
+		return result;
+	}
+
+	int size() const { return coeffs.size(); }
+	double operator[]  (int index) const {
+		return coeffs[index];
+	}
+
+	Polynomial & operator+=(const Polynomial &p) {
+		coeffs.resize(std::max(size(), p.size()));
+		for	(int i = 0; i < p.size(); ++i) {
+			coeffs[i] += p[i];
+		}
+		return *this;
+	}
+	Polynomial & operator-=(const Polynomial &p) {
+		coeffs.resize(std::max(size(), p.size()));
+		for (int i = 0; i < p.size(); ++i) {
+			coeffs[i] -= p[i];
+		}
+		return *this;
+	}
+	Polynomial & operator*=(const double c) {
+		for (int i = 0; i < coeffs.size(); ++i) {
+			coeffs[i] *= c;
+		}
+		return *this;
+	}
+private:
+	// coeff[i] is term for x^[i]
+	std::vector<double> coeffs;
 };
+
+std::pair<double, double> Quadratic(double a, double b, double c) {
+	double bsm4ac = sqr(b) - 4 *a*c;
+	if (bsm4ac >= 0) {
+		return { (-b + sqrt(bsm4ac)) / (2 * a),
+		 		 (-b - sqrt(bsm4ac)) / (2 * a) };
+	}
+	return { std::numeric_limits<double>::quiet_NaN(),
+		std::numeric_limits<double>::quiet_NaN() };
+}
+
+Polynomial operator*(const Polynomial &p0, const Polynomial &p1) {
+	Polynomial result;
+	for (int i = 0; i < p0.size(); ++i) {
+		double pi = p0[i];
+		for (int j = 0; j < p1.size(); ++j) {
+			double pj = p1[j];
+			result += Polynomial(pi * pj, i+j);
+		}
+	}
+	return result;
+}
+
+Polynomial operator*(double c, const Polynomial &p) {
+	Polynomial result = p;
+	result *= c;
+	return result;
+}
+
+Polynomial operator-(const Polynomial &p0, const Polynomial &p1) {
+	Polynomial result = p0;
+	result -= p1;
+	return result;
+}
+
+Polynomial sqr(const Polynomial &p) {
+	return p * p;
+}
+
+std::pair<double, double> Quadratic(const Polynomial &a, const Polynomial &b, const Polynomial &c, double mr) {
+	double bsm4ac = (sqr(b) - 4 * a * c).eval(mr);
+	if (bsm4ac >= 0) {
+		double a2 = (2 * a).eval(mr);
+		return { -b.eval(mr) / a2 + sqrt(bsm4ac) / a2,
+			     -b.eval(mr) / a2 - sqrt(bsm4ac) / a2 };
+	}
+	return { std::numeric_limits<double>::quiet_NaN(),
+		std::numeric_limits<double>::quiet_NaN() };
+}
 
 /////////////////////scene.h
 using Coordinates = std::pair<Vec2f, Vec2f>;
@@ -101,22 +177,24 @@ private:
 
 void EnergyTransfer(double& small_speed, double small_mass, double& large_speed, double large_mass) { 
 	//std::swap(*small_speed, *large_speed); // full energy transfer
-	double mr = (large_mass / small_mass);//mass ration m2/m1
+	const double mr = (large_mass / small_mass);//mass ration m2/m1
 	//divide everything by mr
-	double a = (sqr(mr) + mr);
-	double b = -2 * (sqr(mr)*large_speed + mr * small_speed);
-	double c = sqr(mr)*sqr(large_speed) + 2 * small_speed*large_speed*mr - mr * sqr(large_speed);
+    //	double a = (sqr(mr) + mr);
+	Polynomial a{ 1, 1, 0 };  // mr^2 + mr + 0
+	//	double b = -2 * (sqr(mr)*large_speed + mr * small_speed);
+	Polynomial b{ -2 * large_speed, -2 * small_speed, 0 }; // -2(mr^2 * ls + mr * ss)
+	//	double c = sqr(mr)*sqr(large_speed) + 2 * small_speed*large_speed*mr - mr * sqr(large_speed);
+	Polynomial c{ sqr(large_speed), 2 * small_speed * large_speed - sqr(large_speed), 0 };
 	//DOSENT WORK FOR 1e+8
 	/*double a = 1 + mr;
 	double b = -2 * (mr * large_speed + small_speed);
 	double c = mr * sqr(large_speed) + 2 * small_speed * large_speed - sqr(large_speed);*/
-	quadratic newVel2 = quadratic(a, b, c);
-	vec3 velZeros = newVel2.solve();
+	std::pair<double, double> velZeros= Quadratic(a, b, c, mr);
 	double oldLargeVelocity = large_speed;//v0 of other block
-	if (std::abs(large_speed - velZeros.X) > std::abs(large_speed - velZeros.Y)) {//takes the one further away
-		large_speed = velZeros.X;//vF = other block
+	if (std::abs(large_speed - velZeros.first) > std::abs(large_speed - velZeros.second)) {//takes the one further away
+		large_speed = velZeros.first;//vF = other block
 	}
-	else large_speed = velZeros.Y;
+	else large_speed = velZeros.second;
 	small_speed = small_speed + mr * oldLargeVelocity - mr * large_speed;//vF of current block
 }
 
@@ -181,25 +259,27 @@ public:
 		current{1.0, 5.0, 0.0},
 		previous_clack{ current },
 		next_clack{ 1.0, 2.0, 3.0 }
-	{	}
+	{	
+		UpdateBoxProperties();
+	}
+	// TODO: remove small_mass/large_mass and make getters for Box_properties
 	double small_mass = 1, large_mass = 1;
-	double small_speed = 0, large_speed = 0;
 	Box_properties small_prop, large_prop;
 	bool Update(double new_time) {
 		bool clacked = false;
 		while (next_clack.Time() < new_time) {
 			clacked = true;
 			double time_delta = next_clack.Time() - previous_clack.Time();
-			small_speed = (next_clack.Small().DistanceToWall() - previous_clack.Small().DistanceToWall()) / time_delta;
-			large_speed = (next_clack.Large().DistanceToWall() - previous_clack.Large().DistanceToWall()) / time_delta;
+			double small_speed = (next_clack.Small().DistanceToWall() - previous_clack.Small().DistanceToWall()) / time_delta;
+			double large_speed = (next_clack.Large().DistanceToWall() - previous_clack.Large().DistanceToWall()) / time_delta;
 			previous_clack = next_clack;
 			next_clack = next_clack.NextCollision(small_speed, small_mass, large_speed, large_mass);
 			++num_clacks;
 		}
+		if (clacked) UpdateBoxProperties();
 		current = Interpolate(previous_clack, next_clack, new_time);
 		//update box properties (for drawing)
-		small_prop.velocity = small_speed;
-		large_prop.velocity = large_speed;
+		// TODO: REMOVE THESE HORRIBLE HACKS!
 		small_prop.mass = small_mass;
 		large_prop.mass = large_mass;
 		small_prop.posX = current.Small().DistanceToWall();
@@ -222,6 +302,13 @@ public:
 		return num_clacks;
 	}
 private:
+	void UpdateBoxProperties() {
+		double time_delta = next_clack.Time() - previous_clack.Time();
+		double small_speed = (next_clack.Small().DistanceToWall() - previous_clack.Small().DistanceToWall()) / time_delta;
+		double large_speed = (next_clack.Large().DistanceToWall() - previous_clack.Large().DistanceToWall()) / time_delta;
+		small_prop.velocity = small_speed;
+		large_prop.velocity = large_speed;
+	}
 	State current, previous_clack, next_clack;
 	int num_clacks = 0;
 };
