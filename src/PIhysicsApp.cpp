@@ -333,6 +333,7 @@ public:
 	}
 
 	void textDraw(class Box_properties s);
+	void solutionDraw(class Box_properties s1, class Box_properties s2);
 	static void drawFontText(float text, vec3 pos);
 	audio::VoiceRef clackSound;
 	void clack();
@@ -445,28 +446,62 @@ void PIhysicsApp::clack() {
 
 //drawing the text used for debugging or just other details
 void PIhysicsApp::textDraw(class Box_properties s) {//function for drawing the buttons 
-										 //(	WARNING: RESOURCE HOG!!!!!!!!!!!)
+													//(	WARNING: RESOURCE HOG!!!!!!!!!!!)
 	struct text {
 		string s;
 		double f;
 	};
 	text t[] = {
 		{ "mass:", (s.mass) },
-		{ "vel:", (s.velocity) }
+	{ "vel:", (s.velocity) }
 	//{ "momt", (s.momentum) },
 	//{ "kinE", (s.kinE) }
 	};
 	int i = 0;
 	const int refY = 9, refX = 2.5;
-	
+
 	for (text& ti : t) {
 		int tY = (i + 4);//increment y position for each button based off index
-		//double posX = (s.Coords().first + s.Coords().second) / 2;//middle of two edges
+						 //double posX = (s.Coords().first + s.Coords().second) / 2;//middle of two edges
 		gl::drawString(ti.s, ppm*Vec2f(s.posX + refX, refY - tY), Color(1, 1, 1), Font("Times", 45));
 		drawFontText(ti.f, vec3(s.posX + refX + 1, refY - tY).times(ppm));
 		++i;
 	}
 	gl::color(1, 1, 1);
+}
+
+void PIhysicsApp::solutionDraw(class Box_properties s1, class Box_properties s2) {//function for drawing the buttons 
+	gl::color(1, 1, 1);
+	const float rad = 5;//radius of circle solution in m
+	const Vec2f ref = { 3, 10 }; // 2m right, 8 down
+	const Vec2f center = ref + Vec2f(5, -5);
+	const double slope = -sqrt(s2.mass) / sqrt(s1.mass);//proven by 3blue1brown
+	double dx = 0;
+	gl::drawStrokedCircle(center*ppm, rad*ppm);
+	if (slope != -1 && scene.TotalClacks() % 2 == 1) {
+		Vec2f firstPt = (center + Vec2f(-rad, 0));
+		for (int i = 0; i < scene.TotalClacks(); i++) {
+			firstPt.x += dx * scene.TotalClacks();
+			double a = slope + 1;
+			double b = slope * 2 * (firstPt.y - firstPt.x);
+			double c = slope * firstPt.x * (firstPt.x - 2 * firstPt.y) + sqr(firstPt.y) - sqr(rad);
+
+			std::pair<double, double> velZeros = Quadratic(a, b, c);
+			Vec2f secondPt;
+			if (velZeros.first > velZeros.second) {
+				secondPt.x = velZeros.first;
+			}
+			else secondPt.x = velZeros.second;
+			secondPt.y = ref.y - (slope * (secondPt.x - firstPt.x) + firstPt.y);
+			gl::drawLine(firstPt*ppm, secondPt*ppm);//draws diagonal
+			dx = secondPt.x - firstPt.x;//calculates change in x
+			firstPt = secondPt;//now to draw the vertical
+			secondPt = Vec2f(secondPt.x, secondPt.y + 2 * (center.y - secondPt.y));
+			gl::drawLine(firstPt*ppm, secondPt*ppm);//draws vertical
+
+			firstPt = secondPt;//now back to drawing the diagonal
+		}
+	}
 }
 
 void PIhysicsApp::drawFontText(float text, vec3 pos) {
@@ -490,7 +525,7 @@ void PIhysicsApp::draw() {
 	gl::drawSolidRect(MapArea(Coordinates{{-0.1f, 0.0f },{ 10.0f, -0.1f } })); // Floor
 	textDraw(scene.small_prop);
 	textDraw(scene.large_prop);
-
+	//solutionDraw(scene.small_prop, scene.large_prop);
 	gl::color(1, 1, 1);
 
 	gl::drawString("FPS: ", Vec2f(getWindowWidth() - 250, 10), Color(0, 1, 0), Font("Arial", 45));
